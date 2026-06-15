@@ -14,6 +14,15 @@ const STYLES = [
   { id: "auto", label: "AI 推荐" },
 ];
 
+// 给小白看的画风一句话说明
+const STYLE_DESCRIPTIONS: Record<string, string> = {
+  watercolor: "水彩晕染，半透明色块叠在纸纹上 — 柔软、梦幻、情绪化。",
+  lineart: "黑白线稿，大量留白和剪影 — 简练、克制、像清晨的草图。",
+  cyber: "赛博霓虹，高饱和荧光色与故障感 — 未来、迷幻、不真实。",
+  oil: "古典油画，厚涂笔触和强烈明暗 — 庄重、有戏剧感、19 世纪浪漫主义。",
+  storybook: "绘本插画，扁平形状和柔和色彩 — 童趣、温暖、有故事感。",
+};
+
 type Scene = {
   index: number;
   description_zh: string;
@@ -101,7 +110,13 @@ export default function Home() {
         method: "POST",
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({
-          scenes: dream.scenes,
+          // 剥掉 image_url（可能是 base64 大字符串），server 端不需要图本身，
+          // 只需要 prompt_en + index + 中文描述来理解修改意图。
+          scenes: dream.scenes.map((s) => ({
+            index: s.index,
+            description_zh: s.description_zh,
+            prompt_en: s.prompt_en,
+          })),
           userRequest: userMsg,
           currentStyleKey: dream.style_key || style,
           currentStyleLabel: dream.style_label,
@@ -114,11 +129,22 @@ export default function Home() {
           { role: "ai", text: `❌ 出错了：${data.error || "未知"}` },
         ]);
       } else {
+        // 把没改过的 scene 的旧 image_url 合并回来（server 不持有图，只发回了占位）
+        const oldByIndex = new Map(dream.scenes.map((s) => [s.index, s]));
+        const mergedScenes: Scene[] = (data.scenes as Scene[]).map((s) => {
+          if (s.image_url) return s; // server 改过，已上传新图
+          const old = oldByIndex.get(s.index);
+          // 旧 scene 的图（如果旧 prompt_en 一致则保留旧图；否则说明 server 漏返回了）
+          if (old && old.prompt_en === s.prompt_en && old.image_url) {
+            return { ...s, image_url: old.image_url };
+          }
+          return s;
+        });
         setDream((d) =>
           d
             ? {
                 ...d,
-                scenes: data.scenes,
+                scenes: mergedScenes,
                 style_key: data.style_key,
                 style_label: data.style_label,
               }
@@ -233,6 +259,22 @@ export default function Home() {
               </button>
             ))}
           </div>
+
+          {/* 风格预览：选了非 auto 时显示，给小白看效果 */}
+          {style !== "auto" && STYLE_DESCRIPTIONS[style] && (
+            <div className="mt-4 fade-in">
+              <div className="bg-[var(--background-card)]/50 border border-[var(--border)] rounded-2xl overflow-hidden flex items-center gap-3 p-3">
+                <img
+                  src={`/styles/A/${style}.jpg`}
+                  alt={`${STYLES.find((s) => s.id === style)?.label} 示例`}
+                  className="w-24 h-24 rounded-xl object-cover shrink-0"
+                />
+                <p className="font-serif text-xs text-[var(--foreground)]/80 leading-relaxed flex-1">
+                  {STYLE_DESCRIPTIONS[style]}
+                </p>
+              </div>
+            </div>
+          )}
         </div>
 
         <button

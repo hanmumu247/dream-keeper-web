@@ -1,5 +1,7 @@
 import { NextRequest, NextResponse } from "next/server";
 import { parseRevision, Operation } from "@/app/lib/revisionParser";
+import { uploadBase64Jpeg } from "@/app/lib/storage";
+import { createClient } from "@/app/lib/supabase/server";
 
 export const maxDuration = 300;
 
@@ -34,6 +36,15 @@ const STYLE_PROMPTS: Record<string, string> = {
  */
 export async function POST(req: NextRequest) {
   try {
+    // 鉴权 + 拿 user.id 用于上传 Storage
+    const supabase = await createClient();
+    const {
+      data: { user },
+    } = await supabase.auth.getUser();
+    if (!user) {
+      return NextResponse.json({ error: "未登录" }, { status: 401 });
+    }
+
     const body = await req.json();
     const {
       scenes: currentScenes,
@@ -79,7 +90,7 @@ export async function POST(req: NextRequest) {
 
     // 处理操作
     for (const op of plan.operations) {
-      newScenes = await applyOperation(op, newScenes, newStyleKey);
+      newScenes = await applyOperation(op, newScenes, newStyleKey, user.id);
       if (op.action === "restyle_all") {
         newStyleKey = op.new_style_key;
         newStyleLabel = op.new_style_label;
@@ -107,7 +118,8 @@ export async function POST(req: NextRequest) {
 async function applyOperation(
   op: Operation,
   scenes: Scene[],
-  styleKey: string
+  styleKey: string,
+  userId: string
 ): Promise<Scene[]> {
   switch (op.action) {
     case "delete":
@@ -116,7 +128,7 @@ async function applyOperation(
     case "regenerate_all": {
       const result: Scene[] = [];
       for (const s of scenes) {
-        const img = await callImageApi(s.prompt_en);
+        const img = await callImageApi(s.prompt_en, userId);
         result.push({ ...s, image_url: img.image_url, error: img.error });
         await sleep(1200);
       }
@@ -129,7 +141,7 @@ async function applyOperation(
       for (const s of scenes) {
         // 把旧 style 前缀替换为新的
         const newPrompt = `${newStylePrompt}, ${s.prompt_en.split(",").slice(5).join(",").trim()}`;
-        const img = await callImageApi(newPrompt);
+        const img = await callImageApi(newPrompt, userId);
         result.push({
           ...s,
           prompt_en: newPrompt,
@@ -146,8 +158,9 @@ async function applyOperation(
       const result: Scene[] = [];
       for (const s of scenes) {
         if (s.index === op.index) {
-          const newPrompt = `${s.prompt_en}, ${op.prompt_modifier}`;
-          const img = await callImageApi(newPrompt);
+          // 用 LLM 重写后的完整 prompt 替换旧 prompt（不再拼接 modifier — 拼接对"去掉 X"无效）
+          const newPrompt = op.new_prompt_full;
+          const img = await callImageApi(newPrompt, userId);
           result.push({
             ...s,
             prompt_en: newPrompt,
@@ -164,7 +177,7 @@ async function applyOperation(
     }
 
     case "add": {
-      const img = await callImageApi(op.prompt);
+      const img = await callImageApi(op.prompt, userId);
       const newScene: Scene = {
         index: scenes.length + 1,
         description_zh: op.description,
@@ -187,6 +200,7 @@ async function applyOperation(
 
 async function callImageApi(
   prompt: string,
+  userId: string,
   retries = 2
 ): Promise<{ image_url: string | null; error: string | null }> {
   const apiKey = process.env.JDCLOUD_AI_API_KEY!;
@@ -207,7 +221,7 @@ async function callImageApi(
           size: "1024x1024",
           quality: QUALITY_BY_ENV,
           output_format: "JPEG",
-          output_compression: 80,
+          output_compression: 95,
           n: 1,
         }),
       });
@@ -224,7 +238,13 @@ async function callImageApi(
       const data = await upstream.json();
       const b64 = data.data?.[0]?.b64_json;
       if (!b64) return { image_url: null, error: "no b64" };
-      return { image_url: `data:image/jpeg;base64,${b64}`, error: null };
+
+      // 上传 Storage 拿公开 URL
+      const uploaded = await uploadBase64Jpeg(userId, b64);
+      if (uploaded.error) {
+        return { image_url: null, error: `upload: ${uploaded.error}` };
+      }
+      return { image_url: uploaded.url, error: null };
     } catch (err) {
       if (attempt === retries) {
         return { image_url: null, error: String(err) };

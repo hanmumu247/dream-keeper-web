@@ -1,10 +1,10 @@
 /**
  * 修订理解 — LLM 版
  *
- * 之前是纯规则匹配（只认固定字典里的词），用户稍微换个说法就 fallback 到"整套重画"。
- * 现在让 Claude 看用户原话和当前 scenes，输出结构化的 operations。
- *
- * Operation 类型保持不变 — route.ts 的 applyOperation 不用动。
+ * 用户用自由中文描述想怎么改，LLM 输出结构化 operations。
+ * Operation update 类型用 new_prompt_full（完整重写后的英文 prompt），
+ * 而不是简单拼接 modifier — 拼接对"去掉 X"这类否定指令无效，
+ * 因为旧 prompt 还在指引模型生成 X。
  */
 
 import { callChat, extractJson } from "./aiClient";
@@ -19,7 +19,7 @@ export type Operation =
   | {
       action: "update";
       index: number;
-      prompt_modifier: string;
+      new_prompt_full: string;
       description_modifier: string;
     }
   | { action: "delete"; index: number }
@@ -39,7 +39,7 @@ export type RevisionPlan = {
 
 const VALID_STYLES = ["watercolor", "lineart", "cyber", "oil", "storybook"];
 
-const SYSTEM_PROMPT = `你是一个梦境绘本编辑助手。用户给了你一组已经生成的画面，他用自由中文描述想怎么改，你要把这段描述转成结构化的修改操作。
+const SYSTEM_PROMPT = `你是一个梦境绘本编辑助手。用户给了你一组已经生成的画面，每张画面有完整的英文 prompt，他用自由中文描述想怎么改，你要把这段描述转成结构化的修改操作。
 
 # 输出格式
 严格输出 JSON（不要写任何解释、markdown 标记，只输出 JSON 对象）：
@@ -50,60 +50,120 @@ const SYSTEM_PROMPT = `你是一个梦境绘本编辑助手。用户给了你一
 
 # 五种操作类型
 
-## 1. update — 修改某一张
-{ "action": "update", "index": <1..N>, "prompt_modifier": "<英文修饰词，会拼到该图的 prompt 末尾>", "description_modifier": "<2~6 字中文，给用户看，比如：更暗、加月光、改成晚霞>" }
+## 1. update — 修改某一张画面
+{
+  "action": "update",
+  "index": <1..N>,
+  "new_prompt_full": "<完整重写后的英文 prompt — 把用户要求改的内容真的从原 prompt 里改掉，不是拼接>",
+  "description_modifier": "<2~6 字中文，给用户看，比如：更暗、加月光、改成晚霞、去掉手>"
+}
 
 ## 2. delete — 删除某一张
 { "action": "delete", "index": <1..N> }
 
 ## 3. add — 新增一张
-{ "action": "add", "after_index": <在第几张之后插入>, "prompt": "<完整英文 prompt，描述这张新画面>", "description": "<中文画面描述，10~30 字>" }
+{ "action": "add", "after_index": <在第几张之后插入>, "prompt": "<完整英文 prompt>", "description": "<中文画面描述，10~30 字>" }
 
 ## 4. restyle_all — 整套换风格
 { "action": "restyle_all", "new_style_key": "<watercolor|lineart|cyber|oil|storybook 五选一>", "new_style_label": "<水彩|线稿|赛博|油画|绘本>" }
 
-## 5. regenerate_all — 整套重画（仅当用户明确说"重画/重来/全部重画"时使用）
+## 5. regenerate_all — 整套重画
 { "action": "regenerate_all" }
+
+# 关于 new_prompt_full 的关键规则（最重要！）
+
+**这是一次完整重写，不是 modifier 拼接。** 当用户说"去掉手"、"换成晚霞"、"猫改成狗"这种**替换/移除**指令，你必须：
+
+1. **从原 prompt 里真正删除/替换冲突的描述**。例如原 prompt 含 "a pale hand gently touching petals"，用户说"去掉手"，新 prompt 必须删掉 "a pale hand" 整段，**不能保留然后另加 "no hand"**——扩散模型不理解否定。
+2. **保留风格短语和不冲突的内容**（"soft watercolor illustration..." 一开头那段、构图视角、不相干的物体）。
+3. **正向描述代替的内容**。"去掉手" → 改成 "an unobstructed first-person view"；"换成晚霞" → 把 "moonlight" 替换为 "sunset glow, warm orange and pink sky"。
 
 # 解析准则
 - 用户可能用任何说法。理解 **意图**，不要被措辞局限。
 - 没明确指定"第几张"时，**优先解释成对所有画面的整体修饰**（每张生成一个 update 操作），不要轻易 regenerate_all。
-- 模糊的情绪反馈（"不够梦幻"、"感觉太冷了"、"想要更柔和"）→ 都是整体 update，把情绪转成视觉修饰词。
-- prompt_modifier 必须是英文（要喂给 image API），description_modifier 必须是中文（要给用户看）。
-- 用户提到具体颜色/物体/天气/时间等具象元素时，直接放进 prompt_modifier，不要套字典。例如"加一只猫" → "with a cat sitting in the scene"。
-- 用户说"换成线稿/水彩/...风" 走 restyle_all，new_style_key 必须从 watercolor/lineart/cyber/oil/storybook 五个里选。
-- 同一句话可能要多个操作，operations 数组就放多个。
-- summary_zh 用第一人称，给用户的反馈，简短（一句话）。
+- 模糊情绪反馈（"不够梦幻"、"太冷了"）→ 整体 update，把情绪转成视觉修饰。
+- new_prompt_full 必须是纯英文，不能含中文/占位符。
+- 用户说"换成线稿/水彩"等 → restyle_all。
+- 同一句话可能要多个操作。
+- summary_zh 简短，第一人称。
 
 # 例子
-当前 scenes（示例）：[{index:1,description:"森林里有月光"}, {index:2,description:"湖面倒映星空"}]
 
-用户说"第 2 张感觉太亮了，能暗一点吗"
-→ {"operations":[{"action":"update","index":2,"prompt_modifier":"darker, dimmer lighting, deeper shadows","description_modifier":"更暗"}],"summary_zh":"画面 2 调暗了。"}
+当前 scenes：
+[1] description: "森林里有月光" | prompt_en: "soft watercolor illustration, dreamlike forest at night, silver moonlight filtering through tall trees, gentle blue tones"
+[2] description: "主观视角：手抚花瓣望向屋前" | prompt_en: "soft watercolor illustration, first-person perspective, a pale hand gently touching flower petals in the foreground, looking toward a wooden cottage, warm pink and green tones"
 
+## 例 1：去掉手
+用户说"第 2 张去掉手"
+→ {
+  "operations":[{
+    "action":"update",
+    "index":2,
+    "new_prompt_full":"soft watercolor illustration, first-person perspective, an unobstructed view through soft pink flower petals filling the foreground, looking toward a wooden cottage in the distance, warm pink and green tones, peaceful atmosphere",
+    "description_modifier":"去掉手"
+  }],
+  "summary_zh":"画面 2 去掉了手，改成纯主观视角穿过花瓣望向小屋。"
+}
+（注意：旧 prompt 里的 "a pale hand gently touching flower petals" 整段被删除并替换为 "an unobstructed view through soft pink flower petals"。不再有 hand。）
+
+## 例 2：调暗
+用户说"第 1 张感觉太亮了，能暗一点吗"
+→ {
+  "operations":[{
+    "action":"update",
+    "index":1,
+    "new_prompt_full":"soft watercolor illustration, dreamlike forest at night, faint silver moonlight barely filtering through dense tall trees, deep blue and indigo tones, much darker shadows, low overall exposure",
+    "description_modifier":"更暗"
+  }],
+  "summary_zh":"画面 1 调暗了。"
+}
+
+## 例 3：替换元素
+用户说"第 1 张里月光改成晚霞"
+→ {
+  "operations":[{
+    "action":"update",
+    "index":1,
+    "new_prompt_full":"soft watercolor illustration, dreamlike forest at dusk, warm orange and pink sunset glow filtering through tall trees, golden hour light, peaceful warm tones",
+    "description_modifier":"月光改晚霞"
+  }],
+  "summary_zh":"画面 1 的月光换成晚霞。"
+}
+
+## 例 4：加元素
+用户说"第 1 张加只白猫"
+→ {
+  "operations":[{
+    "action":"update",
+    "index":1,
+    "new_prompt_full":"soft watercolor illustration, dreamlike forest at night, silver moonlight filtering through tall trees, a small white cat sitting calmly on a moss-covered rock in the foreground, gazing toward the moonlight, gentle blue tones",
+    "description_modifier":"加只白猫"
+  }],
+  "summary_zh":"画面 1 加了一只白猫。"
+}
+
+## 例 5：整体氛围
 用户说"整体不够梦幻"
-→ {"operations":[{"action":"update","index":1,"prompt_modifier":"more dreamy ethereal atmosphere, soft glow, hazy","description_modifier":"更梦幻"},{"action":"update","index":2,"prompt_modifier":"more dreamy ethereal atmosphere, soft glow, hazy","description_modifier":"更梦幻"}],"summary_zh":"整体加了梦幻氛围。"}
-
-用户说"第一张加只白色的猫"
-→ {"operations":[{"action":"update","index":1,"prompt_modifier":"with a white cat sitting in the scene","description_modifier":"加只白猫"}],"summary_zh":"画面 1 加了一只白猫。"}
-
-用户说"全部换成水彩"
-→ {"operations":[{"action":"restyle_all","new_style_key":"watercolor","new_style_label":"水彩"}],"summary_zh":"全部改成水彩风。"}`;
+→ 给每张都生成 new_prompt_full，每张都加进梦幻锚点（hazy glow, ethereal mist, soft surreal atmosphere）但保留各自原本的主体内容。`;
 
 export async function parseRevision(
   userRequest: string,
   currentScenes: Scene[]
 ): Promise<RevisionPlan> {
-  const scenesSummary = currentScenes
-    .map((s) => `[${s.index}] ${s.description_zh}`)
+  // 把每张画面的完整 prompt_en 也给 LLM 看 — 让它能真正改写
+  const scenesDetail = currentScenes
+    .map(
+      (s) =>
+        `[${s.index}] description: "${s.description_zh}"\n    prompt_en: "${s.prompt_en}"`
+    )
     .join("\n");
 
   const userMessage = `当前 ${currentScenes.length} 张画面：
-${scenesSummary}
+${scenesDetail}
 
 用户的修改请求："${userRequest}"
 
-请输出 JSON。`;
+请输出 JSON。重申：update 操作的 new_prompt_full 必须是完整重写过的、删掉了冲突描述的英文 prompt。`;
 
   try {
     const reply = await callChat(
@@ -111,12 +171,11 @@ ${scenesSummary}
         { role: "system", content: SYSTEM_PROMPT },
         { role: "user", content: userMessage },
       ],
-      { model: "JoyAI-LLM-1.3T", temperature: 0.3, maxTokens: 2000 }
+      { model: "JoyAI-LLM-1.3T", temperature: 0.3, maxTokens: 4000 }
     );
 
     const parsed = extractJson<RevisionPlan>(reply);
 
-    // 校验 + 净化
     if (!parsed?.operations || !Array.isArray(parsed.operations)) {
       throw new Error("LLM 返回的 operations 不是数组");
     }
@@ -143,7 +202,7 @@ ${scenesSummary}
 }
 
 /**
- * 防御 LLM 返回不规范字段：检查 index 在范围内、style 在白名单内、必填字段非空。
+ * 净化 LLM 输出：校验 index、style 白名单、必填字段非空。
  * 任何关键字段缺失就返回 null，由上层过滤掉。
  */
 function sanitizeOperation(
@@ -154,18 +213,25 @@ function sanitizeOperation(
 
   switch (op.action) {
     case "update": {
-      const o = op as Extract<Operation, { action: "update" }>;
+      const o = op as Extract<Operation, { action: "update" }> & {
+        prompt_modifier?: string;
+      };
+      // 兼容老字段名 prompt_modifier — 万一 LLM 还在用
+      const fullPrompt = o.new_prompt_full?.trim() || o.prompt_modifier?.trim();
       if (
         typeof o.index !== "number" ||
         o.index < 1 ||
         o.index > maxIndex ||
-        !o.prompt_modifier?.trim()
+        !fullPrompt
       )
         return null;
+      // 防御中文混入 prompt
+      const chineseChars = (fullPrompt.match(/[一-鿿]/g) || []).length;
+      if (chineseChars > 3) return null;
       return {
         action: "update",
         index: o.index,
-        prompt_modifier: o.prompt_modifier.trim(),
+        new_prompt_full: fullPrompt,
         description_modifier: o.description_modifier?.trim() || "已调整",
       };
     }

@@ -1,5 +1,7 @@
 import { NextRequest, NextResponse } from "next/server";
 import { planDream } from "@/app/lib/dreamPlanner";
+import { uploadBase64Jpeg } from "@/app/lib/storage";
+import { createClient } from "@/app/lib/supabase/server";
 
 export const maxDuration = 300;
 
@@ -12,6 +14,16 @@ const QUALITY_BY_ENV: "high" | "medium" | "low" =
  */
 export async function POST(req: NextRequest) {
   try {
+    // 必须登录（proxy 已经拦了，但这里再确认一次拿 user_id）
+    const supabase = await createClient();
+    const {
+      data: { user },
+    } = await supabase.auth.getUser();
+    if (!user) {
+      return NextResponse.json({ error: "未登录" }, { status: 401 });
+    }
+    const userId = user.id;
+
     const body = await req.json();
     const { content, emotion = "", style = "watercolor" } = body;
 
@@ -27,7 +39,7 @@ export async function POST(req: NextRequest) {
     console.log(`[generate-dream] 用户输入 content: ${JSON.stringify(content)}`);
     console.log(`[generate-dream] 用户输入 emotion: ${JSON.stringify(emotion)}`);
     console.log(`[generate-dream] 用户选 style: ${style}`);
-    const plan = planDream({ content, emotion, style });
+    const plan = await planDream({ content, emotion, style });
     console.log(
       `[generate-dream] 拆出 ${plan.scenes.length} 张：${plan.title} / ${plan.emotions.join("+")} / ${plan.style_label}`
     );
@@ -61,7 +73,7 @@ export async function POST(req: NextRequest) {
               size: "1024x1024",
               quality: QUALITY_BY_ENV,
               output_format: "JPEG",
-              output_compression: 80,
+              output_compression: 95,
               n: 1,
             }),
           });
@@ -90,9 +102,18 @@ export async function POST(req: NextRequest) {
           if (!b64) {
             return { ...scene, image_url: null, error: "no b64 returned" };
           }
+          // 上传到 Storage，返回公开 URL（替代之前的 base64 内联）
+          const uploaded = await uploadBase64Jpeg(userId, b64);
+          if (uploaded.error) {
+            return {
+              ...scene,
+              image_url: null,
+              error: `upload: ${uploaded.error}`,
+            };
+          }
           return {
             ...scene,
-            image_url: `data:image/jpeg;base64,${b64}`,
+            image_url: uploaded.url,
             error: null,
           };
         } catch (err) {
