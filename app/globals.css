@@ -1,26 +1,57 @@
 @import "tailwindcss";
 
 :root {
-  --background: #ffffff;
-  --foreground: #171717;
+  /* 轻奢风深色主题 */
+  --background: #0F0F1A;
+  --background-card: #1A1A2E;
+  --foreground: #F5F0E8;
+  --muted: #8B8B9E;
+  --accent: #B8A66D;
+  --border: rgba(184, 166, 109, 0.15);
 }
 
 @theme inline {
   --color-background: var(--background);
+  --color-background-card: var(--background-card);
   --color-foreground: var(--foreground);
-  --font-sans: var(--font-geist-sans);
-  --font-mono: var(--font-geist-mono);
+  --color-muted: var(--muted);
+  --color-accent: var(--accent);
+  --color-border-soft: var(--border);
+  --font-serif: var(--font-noto-serif), "Noto Serif SC", "Songti SC", serif;
+  --font-sans: var(--font-noto-sans), "PingFang SC", system-ui, sans-serif;
 }
 
-@media (prefers-color-scheme: dark) {
-  :root {
-    --background: #0a0a0a;
-    --foreground: #ededed;
-  }
-}
-
-body {
+html, body {
   background: var(--background);
   color: var(--foreground);
-  font-family: Arial, Helvetica, sans-serif;
+  font-family: var(--font-sans);
+  -webkit-font-smoothing: antialiased;
+  -moz-osx-font-smoothing: grayscale;
+}
+
+/* 优雅 fade-in 动画 */
+@keyframes fadeIn {
+  from { opacity: 0; transform: translateY(8px); }
+  to { opacity: 1; transform: translateY(0); }
+}
+.fade-in {
+  animation: fadeIn 0.6s ease-out forwards;
+}
+
+@keyframes shimmer {
+  0% { opacity: 0.4; }
+  50% { opacity: 0.8; }
+  100% { opacity: 0.4; }
+}
+.shimmer {
+  animation: shimmer 2s ease-in-out infinite;
+}
+
+/* 隐藏滚动条但保留滚动 */
+.scrollbar-hide::-webkit-scrollbar {
+  display: none;
+}
+.scrollbar-hide {
+  -ms-overflow-style: none;
+  scrollbar-width: none;
 }
