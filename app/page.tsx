@@ -265,8 +265,10 @@ export default function Home() {
             <div className="mt-4 fade-in">
               <div className="bg-[var(--background-card)]/50 border border-[var(--border)] rounded-2xl overflow-hidden flex items-center gap-3 p-3">
                 <img
+                  key={style}
                   src={`/styles/A/${style}.jpg`}
                   alt={`${STYLES.find((s) => s.id === style)?.label} 示例`}
+                  loading="eager"
                   className="w-24 h-24 rounded-xl object-cover shrink-0"
                 />
                 <p className="font-serif text-xs text-[var(--foreground)]/80 leading-relaxed flex-1">
