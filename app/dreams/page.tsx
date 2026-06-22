@@ -2,12 +2,14 @@
 
 import { useEffect, useState } from "react";
 import Link from "next/link";
-import { listDreams, deleteDream, StoredDream } from "../lib/dreamStorage";
+import { listDreams, deleteDream, interpretDream, StoredDream } from "../lib/dreamStorage";
 
 export default function DreamsPage() {
   const [dreams, setDreams] = useState<StoredDream[]>([]);
   const [selected, setSelected] = useState<StoredDream | null>(null);
   const [loaded, setLoaded] = useState(false);
+  const [interpreting, setInterpreting] = useState(false);
+  const [interpretError, setInterpretError] = useState<string | null>(null);
 
   useEffect(() => {
     let cancelled = false;
@@ -33,6 +35,24 @@ export default function DreamsPage() {
     if (selected?.id === id) setSelected(null);
   }
 
+  async function handleInterpret(dreamId: string) {
+    if (interpreting) return;
+    setInterpretError(null);
+    setInterpreting(true);
+    try {
+      const result = await interpretDream(dreamId);
+      // 把结果合并回当前 selected + 列表中的对应项，避免下次进来再调一次
+      setSelected((d) => (d ? { ...d, interpretation: result } : d));
+      setDreams((list) =>
+        list.map((d) => (d.id === dreamId ? { ...d, interpretation: result } : d))
+      );
+    } catch (err) {
+      setInterpretError(String(err instanceof Error ? err.message : err));
+    } finally {
+      setInterpreting(false);
+    }
+  }
+
   // 详情态
   if (selected) {
     const cover =
@@ -41,7 +61,10 @@ export default function DreamsPage() {
     return (
       <div className="py-8 fade-in">
         <button
-          onClick={() => setSelected(null)}
+          onClick={() => {
+            setSelected(null);
+            setInterpretError(null);
+          }}
           className="text-[var(--muted)] text-sm mb-6 hover:text-[var(--foreground)] transition-colors"
         >
           ← 返回牌组
@@ -74,6 +97,48 @@ export default function DreamsPage() {
               <p className="font-serif text-sm leading-relaxed text-[var(--foreground)]/90">
                 {selected.original_emotion}
               </p>
+            </>
+          )}
+        </div>
+
+        {/* 解梦区：已有→直接展示；没有→给按钮 */}
+        <div className="mb-8">
+          {selected.interpretation ? (
+            <div className="bg-[var(--background-card)]/50 border border-[var(--border)] rounded-2xl p-5 fade-in">
+              <div className="mb-4">
+                <p className="text-[var(--accent)] text-xs font-serif mb-2 tracking-wider">
+                  ✦ 梦语
+                </p>
+                <p className="font-serif text-sm leading-relaxed text-[var(--foreground)]/90">
+                  {selected.interpretation.traditional}
+                </p>
+              </div>
+              <div className="border-t border-[var(--border)] pt-4">
+                <p className="text-[var(--accent)] text-xs font-serif mb-2 tracking-wider">
+                  ✦ 心底
+                </p>
+                <p className="font-serif text-sm leading-relaxed text-[var(--foreground)]/90">
+                  {selected.interpretation.psychological}
+                </p>
+              </div>
+            </div>
+          ) : interpreting ? (
+            <div className="w-full py-3 rounded-2xl bg-[var(--background-card)] border border-[var(--border)] text-[var(--muted)] font-serif tracking-wider text-sm text-center">
+              ✦ 正 在 解 读 你 的 梦 ⋯
+            </div>
+          ) : (
+            <>
+              <button
+                onClick={() => handleInterpret(selected.id)}
+                className="w-full py-3 rounded-2xl bg-[var(--background-card)] border border-[var(--accent)]/30 text-[var(--accent)] font-serif tracking-wider hover:bg-[var(--background-card)]/70 hover:border-[var(--accent)]/60 transition-all text-sm"
+              >
+                ✦ 解 一 下 这 个 梦
+              </button>
+              {interpretError && (
+                <div className="mt-2 p-3 bg-red-900/30 border border-red-800/50 rounded-2xl text-xs font-serif text-red-300">
+                  {interpretError}
+                </div>
+              )}
             </>
           )}
         </div>

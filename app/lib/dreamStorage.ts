@@ -15,6 +15,12 @@ export type StoredScene = {
   image_url: string | null;
 };
 
+export type Interpretation = {
+  traditional: string;
+  psychological: string;
+  created_at: string;
+};
+
 export type StoredDream = {
   id: string;
   created_at: string; // ISO timestamp
@@ -28,6 +34,7 @@ export type StoredDream = {
   original_content: string;
   original_emotion: string;
   status: "sealed" | "shared";
+  interpretation: Interpretation | null;
 };
 
 // 数据库行 → 前端类型
@@ -44,6 +51,7 @@ type DbDream = {
   original_content: string;
   original_emotion: string;
   status: "sealed" | "shared";
+  interpretation: Interpretation | null;
 };
 
 function rowToDream(row: DbDream): StoredDream {
@@ -60,15 +68,19 @@ function rowToDream(row: DbDream): StoredDream {
     original_content: row.original_content,
     original_emotion: row.original_emotion,
     status: row.status,
+    interpretation: row.interpretation,
   };
 }
+
+const FULL_SELECT =
+  "id, created_at, title, emotions, mode, style_label, style_key, cover_index, scenes, original_content, original_emotion, status, interpretation";
 
 export async function listDreams(): Promise<StoredDream[]> {
   const supabase = createClient();
   const { data, error } = await supabase
     .from("dreams")
     .select(
-      "id, created_at, title, emotions, mode, style_label, style_key, cover_index, scenes, original_content, original_emotion, status"
+      FULL_SELECT
     )
     .order("created_at", { ascending: false });
 
@@ -84,7 +96,7 @@ export async function getDream(id: string): Promise<StoredDream | null> {
   const { data, error } = await supabase
     .from("dreams")
     .select(
-      "id, created_at, title, emotions, mode, style_label, style_key, cover_index, scenes, original_content, original_emotion, status"
+      FULL_SELECT
     )
     .eq("id", id)
     .maybeSingle();
@@ -97,7 +109,7 @@ export async function getDream(id: string): Promise<StoredDream | null> {
 }
 
 export async function saveDream(
-  dream: Omit<StoredDream, "id" | "created_at">
+  dream: Omit<StoredDream, "id" | "created_at" | "interpretation">
 ): Promise<StoredDream> {
   const supabase = createClient();
 
@@ -123,7 +135,7 @@ export async function saveDream(
       status: dream.status,
     })
     .select(
-      "id, created_at, title, emotions, mode, style_label, style_key, cover_index, scenes, original_content, original_emotion, status"
+      FULL_SELECT
     )
     .single();
 
@@ -169,4 +181,24 @@ export async function countDreams(): Promise<number> {
     return 0;
   }
   return count ?? 0;
+}
+
+/**
+ * 调用 /api/interpret-dream 让 LLM 解一个梦，并存入数据库。
+ * 如果该梦已经有 interpretation，默认直接返回缓存；传 force=true 强制重生成。
+ */
+export async function interpretDream(
+  dreamId: string,
+  force = false
+): Promise<Interpretation> {
+  const res = await fetch("/api/interpret-dream", {
+    method: "POST",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify({ dreamId, force }),
+  });
+  const data = await res.json();
+  if (!res.ok || !data.interpretation) {
+    throw new Error(data.error || "解梦失败");
+  }
+  return data.interpretation as Interpretation;
 }

@@ -1,7 +1,7 @@
 "use client";
 
 import { useState, useEffect } from "react";
-import { saveDream, countDreams } from "./lib/dreamStorage";
+import { saveDream, countDreams, interpretDream, updateDreamStatus, type Interpretation } from "./lib/dreamStorage";
 
 type Stage = "welcome" | "input" | "loading" | "chat" | "settle";
 
@@ -61,6 +61,11 @@ export default function Home() {
   const [revising, setRevising] = useState(false);
   const [revisionLog, setRevisionLog] = useState<RevisionMessage[]>([]);
   const [dreamCount, setDreamCount] = useState(0);
+  // 定稿态：保存后 id（用于解梦+后续状态变更）、解读、loading
+  const [savedDreamId, setSavedDreamId] = useState<string | null>(null);
+  const [interpretation, setInterpretation] = useState<Interpretation | null>(null);
+  const [interpreting, setInterpreting] = useState(false);
+  const [interpretError, setInterpretError] = useState<string | null>(null);
 
   useEffect(() => {
     let cancelled = false;
@@ -422,9 +427,20 @@ export default function Home() {
   if (stage === "settle" && dream) {
     const cover = dream.scenes.find((s) => s.index === dream.cover_index) || dream.scenes[0];
 
-    const persistAndReturn = async (status: "sealed" | "shared") => {
+    // 把梦存到数据库；如果已经存过（有 savedDreamId）就只更新 status
+    const ensureSaved = async (status: "sealed" | "shared"): Promise<string | null> => {
+      if (savedDreamId) {
+        try {
+          await updateDreamStatus(savedDreamId, status);
+        } catch (err) {
+          console.error("更新状态失败：", err);
+          alert("更新状态失败：" + String(err));
+          return null;
+        }
+        return savedDreamId;
+      }
       try {
-        await saveDream({
+        const saved = await saveDream({
           title: dream.title,
           emotions: dream.emotions,
           mode: dream.mode,
@@ -441,17 +457,51 @@ export default function Home() {
           original_emotion: dream.original_emotion || emotion,
           status,
         });
+        setSavedDreamId(saved.id);
+        return saved.id;
       } catch (err) {
         console.error("保存梦境失败：", err);
         alert("保存失败：" + String(err));
-        return;
+        return null;
       }
-      // 重置
+    };
+
+    const resetToWelcome = () => {
       setStage("welcome");
       setContent("");
       setEmotion("");
       setDream(null);
       setRevisionLog([]);
+      setSavedDreamId(null);
+      setInterpretation(null);
+      setInterpretError(null);
+      setInterpreting(false);
+    };
+
+    const persistAndReturn = async (status: "sealed" | "shared") => {
+      const id = await ensureSaved(status);
+      if (!id) return;
+      resetToWelcome();
+    };
+
+    const handleInterpret = async () => {
+      if (interpreting) return;
+      setInterpretError(null);
+      setInterpreting(true);
+      // 先确保梦已存（默认封存状态，用户后面可改）
+      const id = await ensureSaved("sealed");
+      if (!id) {
+        setInterpreting(false);
+        return;
+      }
+      try {
+        const result = await interpretDream(id);
+        setInterpretation(result);
+      } catch (err) {
+        setInterpretError(String(err instanceof Error ? err.message : err));
+      } finally {
+        setInterpreting(false);
+      }
     };
 
     return (
@@ -498,6 +548,57 @@ export default function Home() {
               <p className="font-serif text-sm leading-relaxed text-[var(--foreground)]/90">
                 {dream.original_emotion}
               </p>
+            </div>
+          )}
+        </div>
+
+        {/* 解梦区：按钮 / loading / 结果三态 */}
+        <div className="w-full mb-8">
+          {!interpretation && !interpreting && (
+            <button
+              onClick={handleInterpret}
+              className="w-full py-3 rounded-2xl bg-[var(--background-card)] border border-[var(--accent)]/30 text-[var(--accent)] font-serif tracking-wider hover:bg-[var(--background-card)]/70 hover:border-[var(--accent)]/60 transition-all text-sm"
+            >
+              ✦ 解 一 下 这 个 梦
+            </button>
+          )}
+
+          {interpreting && (
+            <div className="w-full py-3 rounded-2xl bg-[var(--background-card)] border border-[var(--border)] text-[var(--muted)] font-serif tracking-wider text-sm text-center">
+              ✦ 正 在 解 读 你 的 梦 ⋯
+            </div>
+          )}
+
+          {interpretError && !interpreting && (
+            <div className="mt-2 p-3 bg-red-900/30 border border-red-800/50 rounded-2xl text-xs font-serif text-red-300">
+              {interpretError}
+              <button
+                onClick={handleInterpret}
+                className="ml-2 underline hover:text-red-200"
+              >
+                重试
+              </button>
+            </div>
+          )}
+
+          {interpretation && (
+            <div className="bg-[var(--background-card)]/50 border border-[var(--border)] rounded-2xl p-5 text-left fade-in">
+              <div className="mb-4">
+                <p className="text-[var(--accent)] text-xs font-serif mb-2 tracking-wider">
+                  ✦ 梦语
+                </p>
+                <p className="font-serif text-sm leading-relaxed text-[var(--foreground)]/90">
+                  {interpretation.traditional}
+                </p>
+              </div>
+              <div className="border-t border-[var(--border)] pt-4">
+                <p className="text-[var(--accent)] text-xs font-serif mb-2 tracking-wider">
+                  ✦ 心底
+                </p>
+                <p className="font-serif text-sm leading-relaxed text-[var(--foreground)]/90">
+                  {interpretation.psychological}
+                </p>
+              </div>
             </div>
           )}
         </div>
