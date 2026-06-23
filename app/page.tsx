@@ -1,7 +1,7 @@
 "use client";
 
 import { useState, useEffect } from "react";
-import { saveDream, countDreams, interpretDream, updateDreamStatus, type Interpretation } from "./lib/dreamStorage";
+import { saveDream, countDreams, interpretDream, updateDreamStatus, formatDreamTitle, type Interpretation } from "./lib/dreamStorage";
 
 type Stage = "welcome" | "input" | "loading" | "chat" | "settle";
 
@@ -330,7 +330,7 @@ export default function Home() {
 
         {/* 元信息 */}
         <div className="bg-[var(--background-card)]/50 border border-[var(--border)] rounded-2xl p-4 mb-8">
-          <h3 className="font-serif text-lg mb-2">{dream.title}</h3>
+          <h3 className="font-serif text-lg mb-2">{formatDreamTitle(new Date().toISOString())}</h3>
           <p className="font-serif text-xs text-[var(--muted)]">
             {dream.emotions.join(" + ")} · {dream.style_label} ·{" "}
             {dream.scenes.length} 张
@@ -524,7 +524,7 @@ export default function Home() {
           ) : (
             <div className="w-full aspect-square rounded-2xl bg-gradient-to-br from-zinc-700 to-zinc-950 mb-4" />
           )}
-          <h3 className="font-serif text-xl mb-2 text-center">{dream.title}</h3>
+          <h3 className="font-serif text-xl mb-2 text-center">{formatDreamTitle(new Date().toISOString())}</h3>
           <p className="text-[var(--muted)] text-xs font-serif text-center mb-4">
             {dream.emotions.join(" + ")} · {dream.style_label}
           </p>

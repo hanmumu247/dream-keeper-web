@@ -2,7 +2,8 @@
 
 import { useEffect, useState } from "react";
 import Link from "next/link";
-import { listDreams, deleteDream, interpretDream, StoredDream } from "../lib/dreamStorage";
+import { listDreams, deleteDream, interpretDream, formatDreamTitle, StoredDream } from "../lib/dreamStorage";
+import FanDeck from "./FanDeck";
 
 export default function DreamsPage() {
   const [dreams, setDreams] = useState<StoredDream[]>([]);
@@ -10,6 +11,7 @@ export default function DreamsPage() {
   const [loaded, setLoaded] = useState(false);
   const [interpreting, setInterpreting] = useState(false);
   const [interpretError, setInterpretError] = useState<string | null>(null);
+  const [view, setView] = useState<"fan" | "list">("fan");
 
   useEffect(() => {
     let cancelled = false;
@@ -72,10 +74,9 @@ export default function DreamsPage() {
 
         <div className="bg-[var(--background-card)]/50 border border-[var(--border)] rounded-2xl p-4 mb-6">
           <h1 className="font-serif text-2xl tracking-wide mb-2">
-            {selected.title}
+            {formatDreamTitle(selected.created_at)}
           </h1>
           <p className="font-serif text-xs text-[var(--muted)]">
-            {new Date(selected.created_at).toLocaleString("zh-CN")} ·{" "}
             {selected.emotions.join(" + ")} · {selected.style_label} ·{" "}
             {selected.status === "shared" ? "✅ 已分享" : "🔒 封存"}
           </p>
@@ -204,49 +205,69 @@ export default function DreamsPage() {
     );
   }
 
-  // 牌组列表
+  // 牌组主视图
   return (
     <div className="py-8 fade-in">
-      <h2 className="font-serif text-2xl tracking-wide mb-2">我的梦境牌组</h2>
-      <p className="font-serif text-sm text-[var(--muted)] mb-8">
-        共 {dreams.length} 个梦
-      </p>
-
-      <div className="grid grid-cols-2 gap-4">
-        {dreams.map((d) => {
-          const cover =
-            d.scenes.find((s) => s.index === d.cover_index) || d.scenes[0];
-          return (
-            <button
-              key={d.id}
-              onClick={() => setSelected(d)}
-              className="text-left bg-[var(--background-card)] border border-[var(--border)] rounded-2xl overflow-hidden hover:border-[var(--accent)]/40 transition-all group"
-            >
-              {cover?.image_url ? (
-                <img
-                  src={cover.image_url}
-                  alt={d.title}
-                  className="w-full aspect-square object-cover group-hover:scale-105 transition-transform duration-500"
-                />
-              ) : (
-                <div className="w-full aspect-square bg-gradient-to-br from-zinc-700 to-zinc-950" />
-              )}
-              <div className="p-3">
-                <h3 className="font-serif text-sm tracking-wide mb-1 truncate">
-                  {d.title}
-                </h3>
-                <p className="font-serif text-[10px] text-[var(--muted)] truncate">
-                  {new Date(d.created_at).toLocaleDateString("zh-CN", {
-                    month: "numeric",
-                    day: "numeric",
-                  })}{" "}
-                  · {d.emotions.join("+")} · {d.status === "shared" ? "✅" : "🔒"}
-                </p>
-              </div>
-            </button>
-          );
-        })}
+      {/* 顶部：标题 + 右上角切换按钮 */}
+      <div className="flex items-start justify-between mb-2 gap-3">
+        <div>
+          <h2 className="font-serif text-2xl tracking-wide">我的梦境牌组</h2>
+          <p className="font-serif text-sm text-[var(--muted)] mt-1">
+            共 {dreams.length} 个梦
+          </p>
+        </div>
+        <button
+          onClick={() => setView((v) => (v === "fan" ? "list" : "fan"))}
+          className="shrink-0 px-3 py-1.5 rounded-full bg-[var(--background-card)] border border-[var(--border)] text-[var(--muted)] hover:text-[var(--accent)] hover:border-[var(--accent)]/40 font-serif text-xs tracking-wider transition-colors"
+          title={view === "fan" ? "切换到列表视图" : "切换回扇形视图"}
+        >
+          {view === "fan" ? "☰ 全部展开" : "✦ 扇形展示"}
+        </button>
       </div>
+
+      {/* 顶部记梦入口 */}
+      <Link
+        href="/"
+        className="block w-full mb-8 mt-4 py-3 rounded-2xl bg-[var(--background-card)] border border-[var(--accent)]/30 text-[var(--accent)] font-serif text-sm tracking-wider text-center hover:bg-[var(--background-card)]/70 hover:border-[var(--accent)]/60 transition-all"
+      >
+        🌙 记 一 个 新 梦
+      </Link>
+
+      {view === "fan" ? (
+        <FanDeck dreams={dreams} onSelect={(d) => setSelected(d)} />
+      ) : (
+        <div className="grid grid-cols-2 gap-4">
+          {dreams.map((d) => {
+            const cover =
+              d.scenes.find((s) => s.index === d.cover_index) || d.scenes[0];
+            return (
+              <button
+                key={d.id}
+                onClick={() => setSelected(d)}
+                className="text-left bg-[var(--background-card)] border border-[var(--border)] rounded-2xl overflow-hidden hover:border-[var(--accent)]/40 transition-all group"
+              >
+                {cover?.image_url ? (
+                  <img
+                    src={cover.image_url}
+                    alt=""
+                    className="w-full aspect-square object-cover group-hover:scale-105 transition-transform duration-500"
+                  />
+                ) : (
+                  <div className="w-full aspect-square bg-gradient-to-br from-zinc-700 to-zinc-950" />
+                )}
+                <div className="p-3">
+                  <h3 className="font-serif text-sm tracking-wide mb-1 truncate">
+                    {formatDreamTitle(d.created_at)}
+                  </h3>
+                  <p className="font-serif text-[10px] text-[var(--muted)] truncate">
+                    {d.emotions.join("+")} · {d.status === "shared" ? "✅" : "🔒"}
+                  </p>
+                </div>
+              </button>
+            );
+          })}
+        </div>
+      )}
     </div>
   );
 }

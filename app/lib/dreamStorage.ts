@@ -8,6 +8,20 @@
 
 import { createClient } from "./supabase/client";
 
+/**
+ * 把 ISO 时间格式化成"2026/6/23 14:35 的梦"作为梦的标题。
+ * 不再用 LLM 生成的 title 字段，所有 UI 统一用这个。
+ */
+export function formatDreamTitle(createdAt: string): string {
+  const d = new Date(createdAt);
+  const y = d.getFullYear();
+  const m = d.getMonth() + 1;
+  const day = d.getDate();
+  const hh = String(d.getHours()).padStart(2, "0");
+  const mm = String(d.getMinutes()).padStart(2, "0");
+  return `${y}/${m}/${day} ${hh}:${mm} 的梦`;
+}
+
 export type StoredScene = {
   index: number;
   description_zh: string;
