@@ -28,19 +28,50 @@ export default function FanDeck({ dreams, onSelect }: Props) {
 
   const visibleSlots = Math.min(VISIBLE_CARDS, total);
 
-  // 计算每张卡片的扇形位置参数
-  // slot 0 是最前；slot 越大越偏后、越偏右下、旋转越大
+  /**
+   * 根据总卡数自适应布局：
+   *  - 1 张：纯居中，无旋转
+   *  - 2-3 张：轻堆叠，像明信片叠一起
+   *  - 4+ 张：完整扇形，明显铺开
+   */
   function slotStyle(slot: number) {
-    const rotateBase = 4;
-    const offsetX = slot * 12;
-    const offsetY = slot * 6;
+    let rotateBase: number;
+    let offsetXStep: number;
+    let offsetYStep: number;
+    let scaleStep: number;
+
+    if (total === 1) {
+      rotateBase = 0;
+      offsetXStep = 0;
+      offsetYStep = 0;
+      scaleStep = 0;
+    } else if (total === 2) {
+      // 两张：错落开一点点像两张明信片
+      rotateBase = 4;
+      offsetXStep = 14;
+      offsetYStep = 8;
+      scaleStep = 0.025;
+    } else if (total === 3) {
+      // 三张：明显错落，已经有"一摞牌"的感觉
+      rotateBase = 6;
+      offsetXStep = 16;
+      offsetYStep = 10;
+      scaleStep = 0.03;
+    } else {
+      // 4+ 张：完整扇形
+      rotateBase = 9;
+      offsetXStep = 18;
+      offsetYStep = 10;
+      scaleStep = 0.03;
+    }
+
     return {
       rotate: slot * rotateBase,
-      x: offsetX,
-      y: offsetY,
-      scale: 1 - slot * 0.025,
+      x: slot * offsetXStep,
+      y: slot * offsetYStep,
+      scale: 1 - slot * scaleStep,
       zIndex: VISIBLE_CARDS - slot,
-      opacity: slot === visibleSlots - 1 && slot > 0 ? 0.7 : 1,
+      opacity: slot === visibleSlots - 1 && slot > 0 && total > 3 ? 0.7 : 1,
     };
   }
 
