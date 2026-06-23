@@ -23,8 +23,26 @@ export default function BottomNav() {
   }, [pathname]);
 
   const items = [
-    { href: "/", label: "记梦", icon: "🌙", count: 0 },
-    { href: "/dreams", label: "牌组", icon: "📂", count },
+    {
+      href: "/",
+      label: "记梦",
+      icon: "🌙",
+      count: 0,
+      // 月亮 → 金黄
+      activeText: "text-[#E5C36A]",
+      activeBar: "bg-[#E5C36A]",
+      activeBg: "bg-[#E5C36A]/10",
+    },
+    {
+      href: "/dreams",
+      label: "牌组",
+      icon: "📂",
+      count,
+      // 牌组 → 柔紫
+      activeText: "text-[#B49DE8]",
+      activeBar: "bg-[#B49DE8]",
+      activeBg: "bg-[#B49DE8]/10",
+    },
   ];
 
   return (
@@ -41,22 +59,32 @@ export default function BottomNav() {
               href={item.href}
               className={`relative flex flex-col items-center justify-center gap-1 text-xs flex-1 transition-colors ${
                 active
-                  ? "text-[var(--accent)]"
+                  ? item.activeText
                   : "text-[var(--muted)] hover:text-[var(--foreground)]/80"
               }`}
             >
               {/* 顶部高亮条 */}
               {active && (
-                <span className="absolute top-0 left-1/2 -translate-x-1/2 h-[2px] w-10 rounded-full bg-[var(--accent)]" />
+                <span
+                  className={`absolute top-0 left-1/2 -translate-x-1/2 h-[2px] w-10 rounded-full ${item.activeBar}`}
+                />
               )}
               {/* 背景柔光 */}
               {active && (
-                <span className="absolute inset-x-2 inset-y-2 -z-10 rounded-2xl bg-[var(--accent)]/10" />
+                <span
+                  className={`absolute inset-x-2 inset-y-2 -z-10 rounded-2xl ${item.activeBg}`}
+                />
               )}
-              <span className={`text-lg ${active ? "scale-110" : ""} transition-transform`}>
+              <span
+                className={`text-lg ${active ? "scale-110" : ""} transition-transform`}
+              >
                 {item.icon}
               </span>
-              <span className={`font-serif tracking-wider ${active ? "font-semibold" : ""}`}>
+              <span
+                className={`font-serif tracking-wider ${
+                  active ? "font-semibold" : ""
+                }`}
+              >
                 {item.label}
                 {item.count > 0 && ` (${item.count})`}
               </span>
